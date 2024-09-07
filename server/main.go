@@ -1,27 +1,26 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
-	"strconv"
 	"sync"
-	"time"
 
 	"github.com/rs/cors"
 	"golang.org/x/net/websocket"
 )
 
 type Server struct {
-	mu    sync.Mutex
-	conns map[*websocket.Conn]bool
-	count int
+	mu       sync.Mutex
+	conns    map[*websocket.Conn]bool
+	messages []string
 }
 
 func NewServer() *Server {
 	return &Server{
-		conns: make(map[*websocket.Conn]bool),
-		count: 0,
+		conns:    make(map[*websocket.Conn]bool),
+		messages: make([]string, 0),
 	}
 }
 
@@ -49,39 +48,38 @@ func (s *Server) Listen(ws *websocket.Conn) {
 			continue
 		}
 
-		msg := buf[:n]
-		log.Println("received:", string(msg))
+		msg := string(buf[:n])
+		log.Println("received:", msg)
 
-		i, err := strconv.Atoi(string(msg))
+		s.mu.Lock()
+		s.messages = append(s.messages, msg)
+		s.mu.Unlock()
+
+		s.BroadcastMessage(msg)
+	}
+}
+
+func (s *Server) BroadcastMessage(msg string) {
+	encoded, err := json.Marshal(msg)
+	if err != nil {
+		log.Println("json error:", err)
+		return
+	}
+
+	for ws := range s.conns {
+		ws.Write([]byte(encoded))
+	}
+}
+
+func (s *Server) HandleGetMessages() func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		encoded, err := json.Marshal(s.messages)
 		if err != nil {
-			continue
+			w.WriteHeader(500)
 		}
 
 		s.mu.Lock()
-		s.count = i
-		s.mu.Unlock()
-
-		s.BroadcastCount()
-	}
-}
-
-func (s *Server) BroadcastCount() {
-	for ws := range s.conns {
-		ws.Write([]byte(strconv.Itoa(s.count)))
-	}
-}
-
-func (s *Server) Pong() {
-	for range time.Tick(time.Second) {
-		s.count++
-		s.BroadcastCount()
-	}
-}
-
-func (s *Server) HandleCount() func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.mu.Lock()
-		w.Write([]byte(strconv.Itoa(s.count)))
+		w.Write([]byte(encoded))
 		s.mu.Unlock()
 	}
 }
@@ -94,10 +92,8 @@ func main() {
 	})
 	handler := c.Handler(http.DefaultServeMux)
 
-	go s.Pong()
-
 	http.Handle("/ws", websocket.Handler(s.HandleWs))
-	http.HandleFunc("/api/count", s.HandleCount())
+	http.HandleFunc("/api/messages", s.HandleGetMessages())
 	log.Println("server started!")
 	http.ListenAndServe(":8080", handler)
 }

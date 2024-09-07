@@ -4,37 +4,47 @@
 
     let socket: WebSocket;
 
-    let count = 0;
+    let name = "";
+    let message = "";
+    let messages = [] as string[];
 
     onMount(async () => {
-        const res = await fetch(`${SERVER_URL}/api/count`);
+        const res = await fetch(`${SERVER_URL}/api/messages`);
         const data = await res.json();
 
-        count = data;
+        messages = data;
 
         socket = new WebSocket(WS_URL);
 
         socket.onmessage = event => {
-            const i = parseInt(event.data);
-            if (!isNaN(i)) {
-                count = i;
-            }
+            messages = [...messages, JSON.parse(event.data)];
         };
     });
 
-    const increment = () => {
-        socket.send((count + 1).toString());
-    };
-
     const sendMessage = () => {
-        socket.send("Hello, world!");
+        if (name == "" || message == "") {
+            alert("Name and message are required");
+            return;
+        }
+
+        socket.send(`${name}: ${message}`);
+
+        name = message = "";
     };
 </script>
 
-<h1>Welcome to SvelteKit</h1>
-<p>
-    Visit <a href="https://kit.svelte.dev">kit.svelte.dev</a> to read the documentation
-</p>
-<p>Count: {count}</p>
-<button on:click={increment}>Increment</button>
-<button on:click={sendMessage}>Send message</button>
+<div class="flex h-screen flex-col gap-8">
+    <div class="mx-8 mt-8 flex flex-grow flex-col gap-2 overflow-y-scroll">
+        {#each messages as message}
+            <p class="rounded border-l-2 border-violet-500 pl-4">{message}</p>
+        {/each}
+    </div>
+    <form class="mx-8 mb-8 flex gap-8" on:submit={sendMessage}>
+        <input bind:value={name} placeholder="Name" />
+        <input class="w-full" bind:value={message} placeholder="Message" />
+        <button
+            class="bg-violet-500 text-white hover:bg-violet-600"
+            type="submit">Send</button
+        >
+    </form>
+</div>
